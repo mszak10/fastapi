@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Update Profile</title>
+</head>
+<body>
+
+<h1>Update Profile</h1>
+
+{% with messages = get_flashed_messages() %}
+  {% if messages %}
+    <ul class="flashes">
+      {% for message in messages %}
+        <li>{{ message }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+{% endwith %}
+
+<h2>Your Profile</h2>
+<p>Firstname: {{ user.firstname }}</p>
+<p>Lastname: {{ user.lastname }}</p>
+<p>Email: {{ user.email }}</p>
+{% if user_id %}
+  <p>User ID: {{ user_id }}</p>
+{% else %}
+  <p>User ID not available</p>
+{% endif %}
+
+<form method="POST" action="{{ url_for('update_profile', user_id=user.id) }}">
+    <label for="firstname">First name:</label>
+    <input type="text" name="firstname" value="{{ user.firstname }}">
+    <br>
+    <label for="lastname">Last name:</label>
+    <input type="text" name="lastname" value="{{ user.lastname }}">
+    <br>
+    <label for="email">Email:</label>
+    <input type="email" name="email" value="{{ user.email }}" readonly>
+    <br>
+    <label for="password">New Password:</label>
+    <input type="password" name="password">
+    <br>
+    <label for="old_password">Old Password:</label>
+    <input type="password" name="old_password">
+    <br>
+    <button type="submit">Update Profile</button>
+</form>
+
+<br>
+<a href="{{ url_for('profile') }}">View Profile</a>
+<br>
+<a href="{{ url_for('delete_account') }}">Delete Account</a>
+
+</body>
+</html>

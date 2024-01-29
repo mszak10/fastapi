@@ -1,19 +1,24 @@
+import hashlib
 import os
+import re
+import sqlite3
+from datetime import datetime, timedelta
+from typing import List
+
+import jwt
 from fastapi import FastAPI, HTTPException, status, Depends
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
-import sqlite3
 from pydantic import BaseModel
-import hashlib
-from typing import List
-import jwt
-from datetime import datetime, timedelta
 
 SECRET_KEY = "your-secret-key"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 DATABASE_PATH = 'database.db'
+EMAIL_REGEX = """([A-Za-z0-9]+[.-_])*[A-Za-z0-9]+@[A-Za-z0-9-]+(\\.[A-Z|a-z]{2,})+"""
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+app = FastAPI()
 
 
 class Token(BaseModel):
@@ -26,10 +31,10 @@ class ErrorResponse(BaseModel):
 
 
 class UserCreate(BaseModel):
-    firstname: str
-    lastname: str
-    email: str
-    password: str
+    firstname: str = None
+    lastname: str = None
+    email: str = None
+    password: str = None
     old_password: str = None
 
     def as_dict(self):
@@ -199,7 +204,6 @@ def store_token(user_id: int, token: str):
 
 if not os.path.exists(DATABASE_PATH):
     init_database()
-app = FastAPI()
 
 
 @app.post("/token", response_model=Token)
@@ -220,10 +224,25 @@ async def post_login_access_token(form_data: OAuth2PasswordRequestForm = Depends
     # Store the token in the database
     store_token(user["id"], access_token)
 
-    return {"access_token": access_token, "token_type": "bearer"}
+    query = "SELECT * FROM users WHERE email=?"
+    conn = create_connection()
+    cursor = conn.cursor()
+
+    # Pass the email as a parameter to the execute method
+    cursor.execute(query, (form_data.username,))
+    result = cursor.fetchone()
+
+    conn.close()
+
+    print(result)
+    user_id = result
+    print(form_data.username)
+    print(user_id[0])
+
+    return {"access_token": access_token, "token_type": "bearer", "user_id": user_id[0]}
 
 
-@app.post("/users/", response_model=User, responses={
+@app.post("/register/", response_model=User, responses={
     201: {
         "description": "User Created",
         "model": User,
@@ -241,7 +260,7 @@ async def post_login_access_token(form_data: OAuth2PasswordRequestForm = Depends
         "content": {"application/json": {"example": {"detail": "400 Email is already registered"}}}
     },
     422: {
-        "description": "Email and Password Required",
+        "description": "Missing Required Data",
         "model": ErrorResponse,
         "content": {"application/json": {"example": {"detail": "422 Email and password are required"}}}
     },
@@ -257,10 +276,24 @@ def user_endpoint(user: UserCreate):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                             detail="422 Email and password are required")
 
+    # Continue validation
+    if not user.firstname or not user.lastname:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="422 First name and last name are required")
+
+    # Validate email
+    if not re.fullmatch(EMAIL_REGEX, user.email):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="400 Invalid email")
+
     # Check if the email is already in use
     if user_exists(user.email):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="400 Email is already registered")
+
+    if len(user.password) < 8:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="400 Password must be at least 8 characters long")
 
     try:
         user_id = create_user(user)
@@ -272,13 +305,13 @@ def user_endpoint(user: UserCreate):
                             detail="500 Internal server error")
     except Exception as e:
         # Handle other unexpected errors
-        print(e)
+        # print(e)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="500 Unexpected error occurred")
 
 
 # GET request to retrieve all users or a specific user by ID
-@app.get("/users/", response_model=List[User], responses={
+@app.get("/profile/", response_model=List[User], responses={
     200: {
         "description": "Successful Response",
         "model": List[User],
@@ -306,13 +339,13 @@ async def get_users(user_id: int = None):
     if not user:
         raise HTTPException(status_code=404, detail="404 User not found")
 
-    formatted_user = [{"id": user["id"], "firstname": user["firstname"], "lastname": user["lastname"],
-                       "email": user["email"], "password": user["password"]}]
+    formatted_user = [{"id": user.id, "firstname": user.firstname, "lastname": user.lastname,
+                       "email": user.email, "password": user.password}]
 
     return JSONResponse(content={"users": formatted_user})
 
 
-@app.patch("/users/{user_id}", response_model=User, responses={
+@app.patch("/update/{user_id}", response_model=User, responses={
     200: {
         "description": "Successful Update",
         "model": User,
@@ -340,6 +373,12 @@ async def update_user(user_id: int, updated_data: UserCreate, current_user: User
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="404 User not found")
 
+    # Check if the user_id in the URL matches the one in the form data
+    # if user_id != int(updated_data.id):
+    #     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+    #                         detail="400 Mismatch between user_id in URL and form data")
+    print(current_user.id)
+    print(user_id)
     # Check if the authenticated user is the owner of the account
     if current_user.id != user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="401 Unauthorized")
@@ -375,6 +414,44 @@ async def update_user(user_id: int, updated_data: UserCreate, current_user: User
         else:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="404 User not found")
 
+    except Exception as e:
+        print(e)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="500 Internal server error")
+
+
+# Endpoint to remove the account
+@app.delete("/delete/me", response_model=dict, responses={
+    200: {
+        "description": "Account Removed",
+        "content": {"application/json": {"example": {"detail": "Account removed successfully"}}}
+    },
+    401: {
+        "description": "Unauthorized",
+        "model": ErrorResponse,
+        "content": {"application/json": {"example": {"detail": "401 Unauthorized"}}}
+    },
+    404: {
+        "description": "User Not Found",
+        "model": ErrorResponse,
+        "content": {"application/json": {"example": {"detail": "404 User not found"}}}
+    }
+})
+async def remove_account(current_user: User = Depends(get_current_user)):
+    # Check if the user exists
+    user = get_user_by_id(current_user.id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="404 User not found")
+
+    # Check if the authenticated user is the owner of the account
+    if current_user.id != user.id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="401 Unauthorized")
+
+    try:
+        # Remove the account
+        query = "DELETE FROM users WHERE id=?"
+        execute_query(query, (current_user.id,))
+        return {"detail": "Account removed successfully"}
     except Exception as e:
         print(e)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
