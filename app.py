@@ -1,11 +1,12 @@
+import jwt
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 import requests
 
 app = Flask(__name__)
-app.secret_key = "your_secret_key"  # Change this to a secure key in production
+app.secret_key = "MIICWwIBAAKBgHYumsdHE5zt7owx3qYl13kaIdLWnqZ73IB9eIynzNVnQFJDCIZmaY6QR7kyB2hEsT6x6mr6GxQ4APW3PdV4UI1q"
 
 # Set the API base URL
-API_BASE_URL = "http://localhost:8000"  # Change this to your backend API URL
+API_BASE_URL = "http://localhost:8000"
 
 
 @app.route("/")
@@ -19,18 +20,18 @@ def login():
         email = request.form["email"]
         password = request.form["password"]
 
-        # Make a request to your backend for authentication
+        # Make a request to backend for authentication
         response = requests.post(f"{API_BASE_URL}/token", data={"username": email, "password": password})
         if response.status_code == 200:
             session["access_token"] = response.json()["access_token"]
-            print(response.json())
-
-            session["user_id"] = email
-            print(session)
+            decoded_token = jwt.decode(session["access_token"], app.secret_key, algorithms=["HS256"])
+            user_id = decoded_token.get("user_id")
+            session["user_id"] = user_id
             flash("Login successful!", "success")
-            return redirect(url_for("profile"), user_id=user_id)
+            return redirect(url_for("profile"))
 
-        flash("Invalid credentials. Please try again.", "error")
+        reason = response.json().get('detail')
+        flash(f"{reason}. Please try again.", "error")
 
     return render_template("login.html")
 
@@ -46,43 +47,37 @@ def signup():
             "password": request.form["password"],
         }
 
-        # Make a request to your backend to create a new user
+        # Make a request to backend to create a new user
         response = requests.post(f"{API_BASE_URL}/register/", json=data)
         if response.status_code == 201:
             flash("Account created successfully! Please log in.", "success")
             return redirect(url_for("login"))
 
-        flash("Error creating account. Please try again.", "error")
+        reason = response.json().get('detail')
+        flash(f"{reason}. Please try again.", "error")
 
     return render_template("signup.html")
 
 
 @app.route("/profile")
 def profile():
-    # Make a request to your backend to get the user profile
+    # Make a request to backend to get the user profile
     headers = {"Authorization": f"Bearer {session.get('access_token')}"}
     response = requests.get(f"{API_BASE_URL}/profile/", headers=headers)
 
-    # Retrieve the user_id from the query parameters
-    user_id = request.args.get("user_id")
-
     if response.status_code == 200:
         user_data_list = response.json().get("users", [])
-        print(user_data_list)
-
         if user_data_list:
-            user_id_to_select = int(session.get("id", -1))  # Replace with your actual session attribute name
-            print(session)
-            print(user_id_to_select)
+            user_id_to_select = int(session.get("user_id", -1))
 
             # Find the user with the correct ID
             selected_user = next((user for user in user_data_list if user["id"] == user_id_to_select), None)
 
             if selected_user:
-                print(f"Selected user data: {selected_user}")
                 return render_template("profile.html", user=selected_user)
 
-    flash("Unauthorized. Please log in.", "error")
+    reason = response.json().get('detail')
+    flash(f"{reason}. Please try again.", "error")
     return redirect(url_for("login"))
 
 
@@ -105,7 +100,7 @@ def update_profile(user_id):
         "old_password": request.form["old_password"],
     }
 
-    # Make a request to your backend to update the user profile
+    # Make a request to backend to update the user profile
     headers = {"Authorization": f"Bearer {session.get('access_token')}"}
     response = requests.patch(f"{API_BASE_URL}/update/{user_id}", json=data, headers=headers)
 
@@ -113,7 +108,8 @@ def update_profile(user_id):
         flash("Profile updated successfully!", "success")
         return redirect(url_for("profile"))
 
-    flash(f"Error updating profile. {response.reason}. Please try again.", "error")
+    reason = response.json().get('detail')
+    flash(f"{reason}. Please try again.", "error")
     return redirect(url_for("profile"))
 
 
@@ -129,9 +125,8 @@ def delete_account():
     response = requests.get(f"{API_BASE_URL}/profile/", headers=headers)
 
     if response.status_code == 200:
-        user_data = response.json()["users"][0]
 
-        # Make a request to your backend to delete the user's account
+        # Make a request to backend to delete the user's account
         delete_response = requests.delete(f"{API_BASE_URL}/delete/me", headers=headers)
 
         if delete_response.status_code == 200:
@@ -140,7 +135,8 @@ def delete_account():
             flash("Account deleted successfully.", "success")
             return redirect(url_for("home"))
 
-    flash("Error deleting account. Please try again.", "error")
+    reason = response.json().get('detail')
+    flash(f"{reason}. Please try again.", "error")
     return redirect(url_for("profile"))
 
 

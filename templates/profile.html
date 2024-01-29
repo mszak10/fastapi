@@ -23,8 +23,8 @@
 <p>Firstname: {{ user.firstname }}</p>
 <p>Lastname: {{ user.lastname }}</p>
 <p>Email: {{ user.email }}</p>
-{% if user_id %}
-  <p>User ID: {{ user_id }}</p>
+{% if user.id %}
+  <p>User ID: {{ user.id }}</p>
 {% else %}
   <p>User ID not available</p>
 {% endif %}
@@ -37,7 +37,7 @@
     <input type="text" name="lastname" value="{{ user.lastname }}">
     <br>
     <label for="email">Email:</label>
-    <input type="email" name="email" value="{{ user.email }}" readonly>
+    <input type="email" name="email">
     <br>
     <label for="password">New Password:</label>
     <input type="password" name="password">
@@ -49,7 +49,9 @@
 </form>
 
 <br>
-<a href="{{ url_for('profile') }}">View Profile</a>
+<a href="{{ url_for('profile') }}">Refresh Profile</a>
+<br>
+<a href="{{ url_for('logout') }}">Log out</a>
 <br>
 <a href="{{ url_for('delete_account') }}">Delete Account</a>
 

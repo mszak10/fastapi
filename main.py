@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from pydantic import BaseModel
 
-SECRET_KEY = "your-secret-key"
+SECRET_KEY = "MIICWwIBAAKBgHYumsdHE5zt7owx3qYl13kaIdLWnqZ73IB9eIynzNVnQFJDCIZmaY6QR7kyB2hEsT6x6mr6GxQ4APW3PdV4UI1q"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 DATABASE_PATH = 'database.db'
@@ -68,7 +68,6 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
 
 # Function to verify the provided password against the user's actual password
 def verify_password(provided_password: str, actual_password: str) -> bool:
-    print(f"{hash_password(provided_password)} = {actual_password}")
     return hash_password(provided_password) == str(actual_password)
 
 
@@ -218,28 +217,14 @@ async def post_login_access_token(form_data: OAuth2PasswordRequestForm = Depends
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": form_data.username}, expires_delta=access_token_expires
+        data={"sub": form_data.username, "user_id": user["id"]},
+        expires_delta=access_token_expires
     )
 
     # Store the token in the database
     store_token(user["id"], access_token)
 
-    query = "SELECT * FROM users WHERE email=?"
-    conn = create_connection()
-    cursor = conn.cursor()
-
-    # Pass the email as a parameter to the execute method
-    cursor.execute(query, (form_data.username,))
-    result = cursor.fetchone()
-
-    conn.close()
-
-    print(result)
-    user_id = result
-    print(form_data.username)
-    print(user_id[0])
-
-    return {"access_token": access_token, "token_type": "bearer", "user_id": user_id[0]}
+    return {"access_token": access_token, "token_type": "bearer", "user_id": user["id"]}
 
 
 @app.post("/register/", response_model=User, responses={
@@ -303,9 +288,7 @@ def user_endpoint(user: UserCreate):
         # Handle SQLite database errors
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="500 Internal server error")
-    except Exception as e:
-        # Handle other unexpected errors
-        # print(e)
+    except Exception:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="500 Unexpected error occurred")
 
@@ -373,19 +356,12 @@ async def update_user(user_id: int, updated_data: UserCreate, current_user: User
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="404 User not found")
 
-    # Check if the user_id in the URL matches the one in the form data
-    # if user_id != int(updated_data.id):
-    #     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-    #                         detail="400 Mismatch between user_id in URL and form data")
-    print(current_user.id)
-    print(user_id)
     # Check if the authenticated user is the owner of the account
     if current_user.id != user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="401 Unauthorized")
 
     # Check if the email is already in use
     if user_exists(user.email, user_id):
-        print(user.email)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="400 Email is already registered")
 
@@ -396,7 +372,8 @@ async def update_user(user_id: int, updated_data: UserCreate, current_user: User
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="400 Invalid input. For a password change old_password must be provided."
             )
-        if not verify_password(updated_data.old_password, hash_password(current_user.password)):
+        if not verify_password(updated_data.old_password, hash_password(current_user.password)) \
+                and not verify_password(updated_data.old_password, current_user.password):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="400 Invalid input. Old password is required and must match the current password for "
@@ -414,8 +391,7 @@ async def update_user(user_id: int, updated_data: UserCreate, current_user: User
         else:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="404 User not found")
 
-    except Exception as e:
-        print(e)
+    except Exception:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="500 Internal server error")
 
@@ -452,8 +428,7 @@ async def remove_account(current_user: User = Depends(get_current_user)):
         query = "DELETE FROM users WHERE id=?"
         execute_query(query, (current_user.id,))
         return {"detail": "Account removed successfully"}
-    except Exception as e:
-        print(e)
+    except Exception:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="500 Internal server error")
 
